@@ -1,0 +1,21 @@
+{
+    "name": "peertube-plugin-hardware-transcode-vaapi",
+    "version": "0.0.1",
+    "description": "Plugin add transcode profils which use vaapi for hardware acceleration",
+    "engine": {
+      "peertube": ">=3.1.0"
+    },
+    "keywords": [
+      "peertube",
+      "plugin"
+    ],
+    "homepage": "https://git.kher.nl/tlc/peertube-plugin-hardware-transcode-vaapi",
+    "author": "gdsn",
+    "bugs": "https://git.kher.nl/tlc/peertube-plugin-hardware-transcode-vaapi",
+    "library": "./main.js",
+    "staticDirs": {},
+    "css": [],
+    "clientScripts": [],
+    "translations": {}
+  }
+  
