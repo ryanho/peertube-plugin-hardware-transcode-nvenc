@@ -4,23 +4,30 @@ async function register ({
 }) {
 
   const { logger  } = peertubeHelpers
+  const initVaapiOptions = [
+    // enable hardware acceleration
+    '-hwaccel vaapi',
+    '-hwaccel_output_format vaapi',
+    '-vaapi_device /dev/dri/renderD128'
+  ]
+  let latestStreamNum = 9999
 
   // Add hardware encode through vaapi
   {
     const VODBuilder = (options) => {
       const { input, resolution, fps, streamNum } = options
+      const streamSuffix = streamNum == undefined ? '' : `:${streamNum}`
       const targetBitrate = getTargetBitrate(resolution, fps)
+      let shouldInitVaapi = (streamNum == undefined || streamNum <= latestStreamNum)
 
+      if (shouldInitVaapi && streamNum != undefined) {
+        latestStreamNum = streamNum
+      }
       // You can also return a promise
       return {
         videoFilters: [
         ],
-        inputOptions: [
-          // enable hardware acceleration
-          '-hwaccel vaapi',
-          '-hwaccel_output_format vaapi',
-          '-vaapi_device /dev/dri/renderD128'
-        ],
+        inputOptions: shouldInitVaapi ? initVaapiOptions : [],
         outputOptions: [
           '-bf 8', // override hardcoded bf value which cause memory error
           '-pix_fmt vaapi_vld',
@@ -36,17 +43,17 @@ async function register ({
       const { input, resolution, fps, streamNum } = options
       const streamSuffix = streamNum == undefined ? '' : `:${streamNum}`
       const targetBitrate = getTargetBitrate(resolution, fps)
+      let shouldInitVaapi = (streamNum == undefined || streamNum <= latestStreamNum)
+
+      if (shouldInitVaapi && streamNum != undefined) {
+        latestStreamNum = streamNum
+      }
 
       // You can also return a promise
       return {
         videoFilters: [
         ],
-        inputOptions: [
-          // enable hardware acceleration
-          '-hwaccel vaapi',
-          '-hwaccel_output_format vaapi',
-          '-vaapi_device /dev/dri/renderD128'
-        ],
+        inputOptions: shouldInitVaapi ? initVaapiOptions : [],
         outputOptions: [
           '-bf 8', // override hardcoded bf value which cause memory error
           '-pix_fmt vaapi_vld',
@@ -76,6 +83,7 @@ async function register ({
 }
 
 async function unregister() {
+  transcodingManager.removeAllProfilesAndEncoderPriorities()
   return true;
 }
 
