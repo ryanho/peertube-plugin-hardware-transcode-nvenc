@@ -25,8 +25,9 @@ async function register ({
       }
       // You can also return a promise
       return {
-        videoFilters: [
-        ],
+        scaleFilter: {
+          name: 'scale_vaapi'
+        },
         inputOptions: shouldInitVaapi ? initVaapiOptions : [],
         outputOptions: [
           '-bf 8', // override hardcoded bf value which cause memory error
@@ -51,8 +52,9 @@ async function register ({
 
       // You can also return a promise
       return {
-        videoFilters: [
-        ],
+        scaleFilter: {
+          name: 'scale_vaapi'
+        },
         inputOptions: shouldInitVaapi ? initVaapiOptions : [],
         outputOptions: [
           '-bf 8', // override hardcoded bf value which cause memory error
