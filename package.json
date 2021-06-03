@@ -4,7 +4,7 @@
     "license": "MIT",
     "description": "Plugin that adds transcode profiles which use vaapi for hardware acceleration",
     "engine": {
-      "peertube": ">=3.1.0"
+      "peertube": ">=3.2.0"
     },
     "keywords": [
       "peertube",
