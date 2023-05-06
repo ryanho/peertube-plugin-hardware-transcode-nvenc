@@ -1,7 +1,6 @@
 # Hardware h264 encoding using vaapi
 
-This plugin is a work in progress and use features not (yet) available in current version of Peertube.
-You can use this fork: https://github.com/TheoLeCalvar/PeerTube
+This plugin tries to enable hardware accelerated transcoding profiles using vaapi on linux. It should be considered experimental and tinkering will certainly be necessary to make this plugin work on your hardware.
 
 
 For more information on vaapi and hardware acceleration:

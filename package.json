@@ -1,6 +1,6 @@
 {
     "name": "peertube-plugin-hardware-transcode-vaapi",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "license": "MIT",
     "description": "Plugin that adds transcode profiles which use vaapi for hardware acceleration",
     "engine": {
