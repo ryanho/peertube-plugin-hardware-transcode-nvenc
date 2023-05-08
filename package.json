@@ -1,6 +1,6 @@
 {
     "name": "peertube-plugin-hardware-transcode-vaapi",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "license": "MIT",
     "description": "Plugin that adds transcode profiles which use vaapi for hardware acceleration",
     "engine": {
@@ -14,12 +14,16 @@
     "author": "gdsn",
     "bugs": "https://github.com/TheoLeCalvar/peertube-plugin-hardware-transcode-vaapi",
     "library": "./dist/main.js",
+    "files": [
+        "/dist"
+    ],
     "staticDirs": {},
     "css": [],
     "clientScripts": [],
     "translations": {},
     "scripts": {
         "clean": "rm -rf dist/*",
+        "prepare": "npm run build",
         "build": "npx tsc --build src/tsconfig.json"
     },
     "devDependencies": {
