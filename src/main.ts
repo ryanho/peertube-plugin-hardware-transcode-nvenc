@@ -165,10 +165,14 @@ function buildInitOptions() {
 }
 
 async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<EncoderOptions> {
-    const { resolution, fps, streamNum } = params
+    const { resolution, fps, streamNum, inputBitrate } = params
     const streamSuffix = streamNum == undefined ? '' : `:${streamNum}`
-    const targetBitrate = getTargetBitrate(resolution, fps)
+    let targetBitrate = getTargetBitrate(resolution, fps)
     let shouldInitVaapi = (streamNum == undefined || streamNum <= latestStreamNum)
+
+    if (targetBitrate > inputBitrate) {
+        targetBitrate = inputBitrate
+    }
 
     logger.info(`Building encoder options, received ${JSON.stringify(params)}`)
     
@@ -194,10 +198,14 @@ async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<Encoder
 
 
 async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<EncoderOptions> {
-    const { resolution, fps, streamNum } = params
+    const { resolution, fps, streamNum, inputBitrate } = params
     const streamSuffix = streamNum == undefined ? '' : `:${streamNum}`
-    const targetBitrate = getTargetBitrate(resolution, fps)
+    let targetBitrate = getTargetBitrate(resolution, fps)
     let shouldInitVaapi = (streamNum == undefined || streamNum <= latestStreamNum)
+
+    if (targetBitrate > inputBitrate) {
+        targetBitrate = inputBitrate
+    }
 
     logger.info(`Building encoder options, received ${JSON.stringify(params)}`)
 
