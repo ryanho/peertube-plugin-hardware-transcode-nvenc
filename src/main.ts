@@ -44,6 +44,14 @@ export async function register(options :RegisterServerOptions) {
     hardwareDecode = await options.storageManager.getData('hardware-decode') == "true" // ?? DEFAULT_HARDWARE_DECODE // not needed, since undefined == "true" -> false
     compressionLevel = parseInt(await options.storageManager.getData('compression-level')) ?? DEFAULT_COMPRESSION_LEVEL
 
+    for (const [resolution, bitrate] of baseBitrates) {
+        const key = `base-bitrate-${resolution}`
+        const storedValue = await options.storageManager.getData(key)
+        if (storedValue) {
+            baseBitrates.set(resolution, parseInt(storedValue) || bitrate)
+        }
+    }
+
     logger.info(`Hardware decode: ${hardwareDecode}`)
     logger.info(`Compression level: ${compressionLevel}`)
 
@@ -79,9 +87,42 @@ export async function register(options :RegisterServerOptions) {
         private: false
     })
 
+    options.registerSetting({
+        name: 'base-bitrate-description',
+        label: 'Base bitrate',
+
+        type: 'html',
+        html: '',
+        descriptionHTML: `The base bitrate for video. This is the bitrate used when the video is transcoded at 30 FPS. The bitrate will be scaled linearly between this value and the maximum bitrate when the video is transcoded at 60 FPS.`,
+           
+        private: true,
+    })
+    for (const [resolution, bitrate] of baseBitrates) {
+        options.registerSetting({
+            name: `base-bitrate-${resolution}`,
+            label: `Base bitrate for ${printResolution(resolution)}`,
+
+            type: 'input',
+
+            default: bitrate.toString(),
+
+            private: false
+        })
+    }
+
     options.settingsManager.onSettingsChange(async (settings) => {
         hardwareDecode = settings['hardware-decode'] as boolean
         compressionLevel = parseInt(settings['compression-level'] as string) || DEFAULT_COMPRESSION_LEVEL
+
+        for (const [resolution, bitrate] of baseBitrates) {
+            const key = `base-bitrate-${resolution}`
+            const storedValue = settings[key] as string
+            if (storedValue) {
+                baseBitrates.set(resolution, parseInt(storedValue) || bitrate)
+                logger.info(`New base bitrate for ${resolution}: ${baseBitrates.get(resolution)}`)
+            }
+        }
+
         logger.info(`New hardware decode: ${hardwareDecode}`)
         logger.info(`New compression level: ${compressionLevel}`)
     })
@@ -91,6 +132,22 @@ export async function unregister() {
     logger.info("Unregistering peertube-plugin-hardware-encode")
     transcodingManager.removeAllProfilesAndEncoderPriorities()
     return true
+}
+
+function printResolution(resolution : VideoResolution) : string {
+    switch (resolution) {
+        case VideoResolution.H_NOVIDEO: return 'Audio only'
+        case VideoResolution.H_144P:
+        case VideoResolution.H_360P:
+        case VideoResolution.H_480P:
+        case VideoResolution.H_720P:
+        case VideoResolution.H_1080P:
+        case VideoResolution.H_1440P:
+            return `${resolution}p`
+        case VideoResolution.H_4K: return '4K'
+
+        default: return 'Unknown'
+    }
 }
 
 function buildInitOptions() {
@@ -166,7 +223,7 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
     }
     logger.info(`EncoderOptions: ${JSON.stringify(options)}`)
     return options
-  }
+}
 
 /**
  * Calculate the target bitrate based on video resolution and FPS.
