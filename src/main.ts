@@ -93,7 +93,7 @@ export async function register(options :RegisterServerOptions) {
 
         type: 'html',
         html: '',
-        descriptionHTML: `The base bitrate for video. This is the bitrate used when the video is transcoded at 30 FPS. The bitrate will be scaled linearly between this value and the maximum bitrate when the video is transcoded at 60 FPS.`,
+        descriptionHTML: `The base bitrate for video in bits. This is the bitrate used when the video is transcoded at 30 FPS. The bitrate will be scaled linearly between this value and the maximum bitrate when the video is transcoded at 60 FPS.`,
            
         private: true,
     })
@@ -136,7 +136,7 @@ export async function unregister() {
 
 function printResolution(resolution : VideoResolution) : string {
     switch (resolution) {
-        case VideoResolution.H_NOVIDEO: return 'Audio only'
+        case VideoResolution.H_NOVIDEO: return 'audio only'
         case VideoResolution.H_144P:
         case VideoResolution.H_360P:
         case VideoResolution.H_480P:
