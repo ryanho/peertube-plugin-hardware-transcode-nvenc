@@ -5,6 +5,25 @@ import { Logger } from 'winston'
 let logger : Logger
 let transcodingManager : PluginTranscodingManager
 
+const DEFAULT_HARDWARE_DECODE : boolean = false
+const DEFAULT_COMPRESSION_LEVEL : number = 3
+
+let hardwareDecode : boolean = DEFAULT_HARDWARE_DECODE
+let compressionLevel : number = DEFAULT_COMPRESSION_LEVEL
+
+let baseBitrates : Map<VideoResolution, number> = new Map([
+    [VideoResolution.H_NOVIDEO, 64 * 1000],
+    [VideoResolution.H_144P, 320 * 1000],
+    [VideoResolution.H_360P, 780 * 1000],
+    [VideoResolution.H_480P, 1500 * 1000],
+    [VideoResolution.H_720P, 2800 * 1000],
+    [VideoResolution.H_1080P, 5200 * 1000],
+    [VideoResolution.H_1440P, 10_000 * 1000],
+    [VideoResolution.H_4K, 22_000 * 1000]
+])
+
+let latestStreamNum = 9999
+
 export async function register(options :RegisterServerOptions) {
     logger = options.peertubeHelpers.logger
     transcodingManager = options.transcodingManager
@@ -14,12 +33,58 @@ export async function register(options :RegisterServerOptions) {
     const encoder = 'h264_vaapi'
     const profileName = 'vaapi'
 
-    logger.info("adding VOD profile: " + transcodingManager.addVODProfile(encoder, profileName, vodBuilder))
+    // Add trasncoding profiles
+    transcodingManager.addVODProfile(encoder, profileName, vodBuilder)
     transcodingManager.addVODEncoderPriority('video', encoder, 1000)
 
-    logger.info("adding live profile: " + transcodingManager.addLiveProfile(encoder, profileName, liveBuilder))
+    transcodingManager.addLiveProfile(encoder, profileName, liveBuilder)
     transcodingManager.addLiveEncoderPriority('video', encoder, 1000)
 
+    // Get stored data from the database, default to constants if not found
+    hardwareDecode = await options.storageManager.getData('hardware-decode') == "true" // ?? DEFAULT_HARDWARE_DECODE // not needed, since undefined == "true" -> false
+    compressionLevel = parseInt(await options.storageManager.getData('compression-level')) ?? DEFAULT_COMPRESSION_LEVEL
+
+    logger.info(`Hardware decode: ${hardwareDecode}`)
+    logger.info(`Compression level: ${compressionLevel}`)
+
+    options.registerSetting({
+        name: 'hardware-decode',
+        label: 'Hardware decode',
+
+        type: 'input-checkbox',
+
+        descriptionHTML: 'Use hardware video decoder instead of software decoder. This will slightly improve performance but may cause some issues with some videos. If you encounter issues, disable this option and restart failed jobs.',
+
+        default: hardwareDecode,
+        private: false
+    })
+    options.registerSetting({
+        name: 'compression-level',
+        label: 'Compression level',
+
+        type: 'select',
+        options: [
+            { label: '1', value: '1' },
+            { label: '2', value: '2' },
+            { label: '3', value: '3' },
+            { label: '4', value: '4' },
+            { label: '5', value: '5' },
+            { label: '6', value: '6' },
+            { label: '7', value: '7' }
+        ],
+
+        descriptionHTML: 'This parameter controls the speed / quality tradeoff. Lower values mean better quality but slower encoding. Higher values mean faster encoding but lower quality. This setting is hardware dependent, you may need to experiment to find the best value for your hardware. Some hardware may have less than 7 levels of compression.',
+
+        default: compressionLevel.toString(),
+        private: false
+    })
+
+    options.settingsManager.onSettingsChange(async (settings) => {
+        hardwareDecode = settings['hardware-decode'] as boolean
+        compressionLevel = parseInt(settings['compression-level'] as string) || DEFAULT_COMPRESSION_LEVEL
+        logger.info(`New hardware decode: ${hardwareDecode}`)
+        logger.info(`New compression level: ${compressionLevel}`)
+    })
 }
 
 export async function unregister() {
@@ -28,14 +93,19 @@ export async function unregister() {
     return true
 }
 
-const initVaapiOptions = [
-    // enable hardware acceleration
-    '-vaapi_device /dev/dri/renderD128'
-]
-
-
-
-let latestStreamNum = 9999
+function buildInitOptions() {
+    if (hardwareDecode) {
+        return [
+            '-hwaccel vaapi',
+            '-vaapi_device /dev/dri/renderD128',
+            '-hwaccel_output_format vaapi',
+        ]
+    } else {
+        return [
+            '-vaapi_device /dev/dri/renderD128'
+        ]
+    }
+}
 
 async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<EncoderOptions> {
     const { resolution, fps, streamNum } = params
@@ -51,14 +121,13 @@ async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<Encoder
     // You can also return a promise
     let options : EncoderOptions = {
         scaleFilter: {
-            name: 'format=nv12,hwupload,scale_vaapi'
+            // software decode requires specifying pixel format for hardware filter and upload it to GPU
+            name: hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
         },
-        inputOptions: shouldInitVaapi ? initVaapiOptions : [],
+        inputOptions: shouldInitVaapi ? buildInitOptions() : [],
         outputOptions: [
-            '-bf 8', // override hardcoded bf value which cause memory error
-            `-preset veryfast`,
+            `-compression_level ${compressionLevel}`,
             `-b:v${streamSuffix} ${targetBitrate}`,
-            `-maxrate ${targetBitrate}`,
             `-bufsize ${targetBitrate * 2}`
         ]
     }
@@ -82,18 +151,16 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
     // You can also return a promise
     const options = {
       scaleFilter: {
-        name: 'scale_vaapi'
+        name: hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
       },
-      inputOptions: shouldInitVaapi ? initVaapiOptions : [],
+      inputOptions: shouldInitVaapi ? buildInitOptions() : [],
       outputOptions: [
-        '-bf 8', // override hardcoded bf value which cause memory error
-        `-preset veryfast`,
+        `-compression_level ${compressionLevel}`,
         `-r:v${streamSuffix} ${fps}`,
         `-profile:v${streamSuffix} high`,
         `-level:v${streamSuffix} 3.1`,
         `-g:v${streamSuffix} ${fps*2}`,
         `-b:v${streamSuffix} ${targetBitrate}`,
-        `-maxrate ${targetBitrate}`,
         `-bufsize ${targetBitrate * 2}`
       ]
     }
@@ -101,63 +168,6 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
     return options
   }
 
-
-
-// copied from Peertube, is it possible to import it instead of copying it ?
-/**
- * Bitrate targets for different resolutions, at VideoTranscodingFPS.AVERAGE.
- *
- * Sources for individual quality levels:
- * Google Live Encoder: https://support.google.com/youtube/answer/2853702?hl=en
- * YouTube Video Info: youtube-dl --list-formats, with sample videos
- */
-function getBaseBitrate (resolution : VideoResolution) : number {
-    if (resolution === 0) {
-      // audio-only
-      return 64 * 1000
-    }
-  
-    if (resolution <= 240) {
-      // quality according to Google Live Encoder: 300 - 700 Kbps
-      // Quality according to YouTube Video Info: 285 Kbps
-      return 320 * 1000
-    }
-  
-    if (resolution <= 360) {
-      // quality according to Google Live Encoder: 400 - 1,000 Kbps
-      // Quality according to YouTube Video Info: 700 Kbps
-      return 780 * 1000
-    }
-  
-    if (resolution <= 480) {
-      // quality according to Google Live Encoder: 500 - 2,000 Kbps
-      // Quality according to YouTube Video Info: 1300 Kbps
-      return 1500 * 1000
-    }
-  
-    if (resolution <= 720) {
-      // quality according to Google Live Encoder: 1,500 - 4,000 Kbps
-      // Quality according to YouTube Video Info: 2680 Kbps
-      return 2800 * 1000
-    }
-  
-    if (resolution <= 1080) {
-      // quality according to Google Live Encoder: 3000 - 6000 Kbps
-      // Quality according to YouTube Video Info: 5081 Kbps
-      return 5200 * 1000
-    }
-  
-    if (resolution <= 1440) {
-      // quality according to Google Live Encoder: 6000 - 13000 Kbps
-      // Quality according to YouTube Video Info: 8600 (av01) - 17000 (vp9.2) Kbps
-      return 10_000 * 1000
-    }
-  
-    // 4K
-    // quality according to Google Live Encoder: 13000 - 34000 Kbps
-    return 22_000 * 1000
-}
-  
 /**
  * Calculate the target bitrate based on video resolution and FPS.
  *
@@ -168,7 +178,7 @@ function getBaseBitrate (resolution : VideoResolution) : number {
  * between these two points.
  */
 function getTargetBitrate (resolution : VideoResolution, fps : number) : number {
-    const baseBitrate = getBaseBitrate(resolution)
+    const baseBitrate = baseBitrates.get(resolution) || 0
     // The maximum bitrate, used when fps === VideoTranscodingFPS.MAX
     // Based on numbers from Youtube, 60 fps bitrate divided by 30 fps bitrate:
     //  720p: 2600 / 1750 = 1.49
