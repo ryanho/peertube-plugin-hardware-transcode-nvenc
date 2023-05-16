@@ -42,7 +42,7 @@ export async function register(options :RegisterServerOptions) {
 
     // Get stored data from the database, default to constants if not found
     hardwareDecode = await options.storageManager.getData('hardware-decode') == "true" // ?? DEFAULT_HARDWARE_DECODE // not needed, since undefined == "true" -> false
-    quality = parseInt(await options.storageManager.getData('compression-level')) ?? DEFAULT_QUALITY
+    quality = parseInt(await options.storageManager.getData('compression-level')) || DEFAULT_QUALITY
 
     for (const [resolution, bitrate] of baseBitrates) {
         const key = `base-bitrate-${resolution}`
