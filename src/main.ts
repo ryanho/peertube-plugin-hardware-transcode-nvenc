@@ -6,10 +6,10 @@ let logger : Logger
 let transcodingManager : PluginTranscodingManager
 
 const DEFAULT_HARDWARE_DECODE : boolean = false
-const DEFAULT_COMPRESSION_LEVEL : number = 3
+const DEFAULT_QUALITY : number = -1
 
 let hardwareDecode : boolean = DEFAULT_HARDWARE_DECODE
-let compressionLevel : number = DEFAULT_COMPRESSION_LEVEL
+let quality : number = DEFAULT_QUALITY
 
 let baseBitrates : Map<VideoResolution, number> = new Map([
     [VideoResolution.H_NOVIDEO, 64 * 1000],
@@ -42,7 +42,7 @@ export async function register(options :RegisterServerOptions) {
 
     // Get stored data from the database, default to constants if not found
     hardwareDecode = await options.storageManager.getData('hardware-decode') == "true" // ?? DEFAULT_HARDWARE_DECODE // not needed, since undefined == "true" -> false
-    compressionLevel = parseInt(await options.storageManager.getData('compression-level')) ?? DEFAULT_COMPRESSION_LEVEL
+    quality = parseInt(await options.storageManager.getData('compression-level')) ?? DEFAULT_QUALITY
 
     for (const [resolution, bitrate] of baseBitrates) {
         const key = `base-bitrate-${resolution}`
@@ -53,7 +53,7 @@ export async function register(options :RegisterServerOptions) {
     }
 
     logger.info(`Hardware decode: ${hardwareDecode}`)
-    logger.info(`Compression level: ${compressionLevel}`)
+    logger.info(`Quality: ${quality}`)
 
     options.registerSetting({
         name: 'hardware-decode',
@@ -67,11 +67,12 @@ export async function register(options :RegisterServerOptions) {
         private: false
     })
     options.registerSetting({
-        name: 'compression-level',
-        label: 'Compression level',
+        name: 'quality',
+        label: 'Quality',
 
         type: 'select',
         options: [
+            { label: 'Automatic', value: '-1' },
             { label: '1', value: '1' },
             { label: '2', value: '2' },
             { label: '3', value: '3' },
@@ -83,7 +84,7 @@ export async function register(options :RegisterServerOptions) {
 
         descriptionHTML: 'This parameter controls the speed / quality tradeoff. Lower values mean better quality but slower encoding. Higher values mean faster encoding but lower quality. This setting is hardware dependent, you may need to experiment to find the best value for your hardware. Some hardware may have less than 7 levels of compression.',
 
-        default: compressionLevel.toString(),
+        default: quality.toString(),
         private: false
     })
 
@@ -112,7 +113,7 @@ export async function register(options :RegisterServerOptions) {
 
     options.settingsManager.onSettingsChange(async (settings) => {
         hardwareDecode = settings['hardware-decode'] as boolean
-        compressionLevel = parseInt(settings['compression-level'] as string) || DEFAULT_COMPRESSION_LEVEL
+        quality = parseInt(settings['quality'] as string) || DEFAULT_QUALITY
 
         for (const [resolution, bitrate] of baseBitrates) {
             const key = `base-bitrate-${resolution}`
@@ -124,7 +125,7 @@ export async function register(options :RegisterServerOptions) {
         }
 
         logger.info(`New hardware decode: ${hardwareDecode}`)
-        logger.info(`New compression level: ${compressionLevel}`)
+        logger.info(`New quality: ${quality}`)
     })
 }
 
@@ -187,7 +188,7 @@ async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<Encoder
         },
         inputOptions: shouldInitVaapi ? buildInitOptions() : [],
         outputOptions: [
-            `-compression_level ${compressionLevel}`,
+            `-quality ${quality}`,
             `-b:v${streamSuffix} ${targetBitrate}`,
             `-bufsize ${targetBitrate * 2}`
         ]
@@ -220,7 +221,7 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
       },
       inputOptions: shouldInitVaapi ? buildInitOptions() : [],
       outputOptions: [
-        `-compression_level ${compressionLevel}`,
+        `-quality ${quality}`,
         `-r:v${streamSuffix} ${fps}`,
         `-profile:v${streamSuffix} high`,
         `-level:v${streamSuffix} 3.1`,
