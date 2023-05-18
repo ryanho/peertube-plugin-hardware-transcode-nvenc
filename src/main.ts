@@ -1,4 +1,4 @@
-import { PluginTranscodingManager } from "@peertube/peertube-types"
+import { PluginSettingsManager, PluginTranscodingManager } from "@peertube/peertube-types"
 import { EncoderOptions, EncoderOptionsBuilderParams, RegisterServerOptions, VideoResolution } from "@peertube/peertube-types"
 import { Logger } from 'winston'
 
@@ -7,11 +7,7 @@ let transcodingManager : PluginTranscodingManager
 
 const DEFAULT_HARDWARE_DECODE : boolean = false
 const DEFAULT_QUALITY : number = -1
-
-let hardwareDecode : boolean = DEFAULT_HARDWARE_DECODE
-let quality : number = DEFAULT_QUALITY
-
-let baseBitrates : Map<VideoResolution, number> = new Map([
+const DEFAULT_BITRATES : Map<VideoResolution, number> = new Map([
     [VideoResolution.H_NOVIDEO, 64 * 1000],
     [VideoResolution.H_144P, 320 * 1000],
     [VideoResolution.H_360P, 780 * 1000],
@@ -22,11 +18,22 @@ let baseBitrates : Map<VideoResolution, number> = new Map([
     [VideoResolution.H_4K, 22_000 * 1000]
 ])
 
+interface PluginSettings {
+    hardwareDecode : boolean
+    quality: number
+    baseBitrate: Map<VideoResolution, number>
+}
+let pluginSettings : PluginSettings = {
+    hardwareDecode: DEFAULT_HARDWARE_DECODE,
+    quality: DEFAULT_QUALITY,
+    baseBitrate: structuredClone(DEFAULT_BITRATES)
+}
+
 let latestStreamNum = 9999
 
-export async function register(options :RegisterServerOptions) {
-    logger = options.peertubeHelpers.logger
-    transcodingManager = options.transcodingManager
+export async function register({settingsManager, peertubeHelpers, transcodingManager: transcode, registerSetting} :RegisterServerOptions) {
+    logger = peertubeHelpers.logger
+    transcodingManager = transcode
 
     logger.info("Registering peertube-plugin-hardware-encode");
 
@@ -40,22 +47,10 @@ export async function register(options :RegisterServerOptions) {
     transcodingManager.addLiveProfile(encoder, profileName, liveBuilder)
     transcodingManager.addLiveEncoderPriority('video', encoder, 1000)
 
-    // Get stored data from the database, default to constants if not found
-    hardwareDecode = await options.storageManager.getData('hardware-decode') == "true" // ?? DEFAULT_HARDWARE_DECODE // not needed, since undefined == "true" -> false
-    quality = parseInt(await options.storageManager.getData('compression-level')) || DEFAULT_QUALITY
+    // Load existing settings and default to constants if not present
+    await loadSettings(settingsManager)
 
-    for (const [resolution, bitrate] of baseBitrates) {
-        const key = `base-bitrate-${resolution}`
-        const storedValue = await options.storageManager.getData(key)
-        if (storedValue) {
-            baseBitrates.set(resolution, parseInt(storedValue) || bitrate)
-        }
-    }
-
-    logger.info(`Hardware decode: ${hardwareDecode}`)
-    logger.info(`Quality: ${quality}`)
-
-    options.registerSetting({
+    registerSetting({
         name: 'hardware-decode',
         label: 'Hardware decode',
 
@@ -63,10 +58,10 @@ export async function register(options :RegisterServerOptions) {
 
         descriptionHTML: 'Use hardware video decoder instead of software decoder. This will slightly improve performance but may cause some issues with some videos. If you encounter issues, disable this option and restart failed jobs.',
 
-        default: hardwareDecode,
+        default: DEFAULT_HARDWARE_DECODE,
         private: false
     })
-    options.registerSetting({
+    registerSetting({
         name: 'quality',
         label: 'Quality',
 
@@ -84,48 +79,37 @@ export async function register(options :RegisterServerOptions) {
 
         descriptionHTML: 'This parameter controls the speed / quality tradeoff. Lower values mean better quality but slower encoding. Higher values mean faster encoding but lower quality. This setting is hardware dependent, you may need to experiment to find the best value for your hardware. Some hardware may have less than 7 levels of compression.',
 
-        default: quality.toString(),
+        default: DEFAULT_QUALITY.toString(),
         private: false
     })
 
-    options.registerSetting({
+    registerSetting({
         name: 'base-bitrate-description',
         label: 'Base bitrate',
 
         type: 'html',
         html: '',
-        descriptionHTML: `The base bitrate for video in bits. This is the bitrate used when the video is transcoded at 30 FPS. The bitrate will be scaled linearly between this value and the maximum bitrate when the video is transcoded at 60 FPS.`,
+        descriptionHTML: `The base bitrate for video in bits. We take the min bitrate between the bitrate setting and video bitrate.<br/>This is the bitrate used when the video is transcoded at 30 FPS. The bitrate will be scaled linearly between this value and the maximum bitrate when the video is transcoded at 60 FPS. Wrong values are replaced by default values.`,
            
         private: true,
     })
-    for (const [resolution, bitrate] of baseBitrates) {
-        options.registerSetting({
+    for (const [resolution, bitrate] of pluginSettings.baseBitrate) {
+        logger.info("registering bitrate setting: "+ bitrate.toString())
+        registerSetting({
             name: `base-bitrate-${resolution}`,
             label: `Base bitrate for ${printResolution(resolution)}`,
 
             type: 'input',
 
-            default: bitrate.toString(),
+            default: DEFAULT_BITRATES.get(resolution)?.toString(),
+            descriptionHTML: `Default value: ${DEFAULT_BITRATES.get(resolution)}`,
 
             private: false
         })
     }
 
-    options.settingsManager.onSettingsChange(async (settings) => {
-        hardwareDecode = settings['hardware-decode'] as boolean
-        quality = parseInt(settings['quality'] as string) || DEFAULT_QUALITY
-
-        for (const [resolution, bitrate] of baseBitrates) {
-            const key = `base-bitrate-${resolution}`
-            const storedValue = settings[key] as string
-            if (storedValue) {
-                baseBitrates.set(resolution, parseInt(storedValue) || bitrate)
-                logger.info(`New base bitrate for ${resolution}: ${baseBitrates.get(resolution)}`)
-            }
-        }
-
-        logger.info(`New hardware decode: ${hardwareDecode}`)
-        logger.info(`New quality: ${quality}`)
+    settingsManager.onSettingsChange(async (settings) => {
+        loadSettings(settingsManager)
     })
 }
 
@@ -133,6 +117,21 @@ export async function unregister() {
     logger.info("Unregistering peertube-plugin-hardware-encode")
     transcodingManager.removeAllProfilesAndEncoderPriorities()
     return true
+}
+
+async function loadSettings(settingsManager: PluginSettingsManager) {
+    pluginSettings.hardwareDecode = await settingsManager.getSetting('hardware-decode') == "true"
+    pluginSettings.quality = parseInt(await settingsManager.getSetting('quality') as string) || DEFAULT_QUALITY
+
+    for (const [resolution, bitrate] of DEFAULT_BITRATES) {
+        const key = `base-bitrate-${resolution}`
+        const storedValue = await settingsManager.getSetting(key) as string
+        pluginSettings.baseBitrate.set(resolution, parseInt(storedValue) || bitrate)
+        logger.info(`Bitrate ${printResolution(resolution)}: ${pluginSettings.baseBitrate.get(resolution)}`)
+    }
+
+    logger.info(`Hardware decode: ${pluginSettings.hardwareDecode}`)
+    logger.info(`Quality: ${pluginSettings.quality}`)
 }
 
 function printResolution(resolution : VideoResolution) : string {
@@ -152,7 +151,7 @@ function printResolution(resolution : VideoResolution) : string {
 }
 
 function buildInitOptions() {
-    if (hardwareDecode) {
+    if (pluginSettings.hardwareDecode) {
         return [
             '-hwaccel vaapi',
             '-vaapi_device /dev/dri/renderD128',
@@ -184,11 +183,11 @@ async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<Encoder
     let options : EncoderOptions = {
         scaleFilter: {
             // software decode requires specifying pixel format for hardware filter and upload it to GPU
-            name: hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+            name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
         },
         inputOptions: shouldInitVaapi ? buildInitOptions() : [],
         outputOptions: [
-            `-quality ${quality}`,
+            `-quality ${pluginSettings.quality}`,
             `-b:v${streamSuffix} ${targetBitrate}`,
             `-bufsize ${targetBitrate * 2}`
         ]
@@ -217,11 +216,11 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
     // You can also return a promise
     const options = {
       scaleFilter: {
-        name: hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+        name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
       },
       inputOptions: shouldInitVaapi ? buildInitOptions() : [],
       outputOptions: [
-        `-quality ${quality}`,
+        `-quality ${pluginSettings.quality}`,
         `-r:v${streamSuffix} ${fps}`,
         `-profile:v${streamSuffix} high`,
         `-level:v${streamSuffix} 3.1`,
@@ -244,7 +243,7 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
  * between these two points.
  */
 function getTargetBitrate (resolution : VideoResolution, fps : number) : number {
-    const baseBitrate = baseBitrates.get(resolution) || 0
+    const baseBitrate = pluginSettings.baseBitrate.get(resolution) || 0
     // The maximum bitrate, used when fps === VideoTranscodingFPS.MAX
     // Based on numbers from Youtube, 60 fps bitrate divided by 30 fps bitrate:
     //  720p: 2600 / 1750 = 1.49
