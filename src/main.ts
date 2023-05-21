@@ -26,7 +26,7 @@ interface PluginSettings {
 let pluginSettings : PluginSettings = {
     hardwareDecode: DEFAULT_HARDWARE_DECODE,
     quality: DEFAULT_QUALITY,
-    baseBitrate: structuredClone(DEFAULT_BITRATES)
+    baseBitrate: new Map(DEFAULT_BITRATES)
 }
 
 let latestStreamNum = 9999
