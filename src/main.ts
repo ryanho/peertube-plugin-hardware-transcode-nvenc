@@ -6,7 +6,8 @@ let logger : Logger
 let transcodingManager : PluginTranscodingManager
 
 const DEFAULT_HARDWARE_DECODE : boolean = false
-const DEFAULT_QUALITY : number = -1
+const DEFAULT_VOD_QUALITY : number = 15
+const DEFAULT_LIVE_QUALITY : number = 7
 const DEFAULT_BITRATES : Map<VideoResolution, number> = new Map([
     [VideoResolution.H_NOVIDEO, 64 * 1000],
     [VideoResolution.H_144P, 320 * 1000],
@@ -20,12 +21,14 @@ const DEFAULT_BITRATES : Map<VideoResolution, number> = new Map([
 
 interface PluginSettings {
     hardwareDecode : boolean
-    quality: number
+    vodQuality: number
+    liveQuality: number
     baseBitrate: Map<VideoResolution, number>
 }
 let pluginSettings : PluginSettings = {
     hardwareDecode: DEFAULT_HARDWARE_DECODE,
-    quality: DEFAULT_QUALITY,
+    vodQuality: DEFAULT_VOD_QUALITY,
+    liveQuality: DEFAULT_LIVE_QUALITY,
     baseBitrate: new Map(DEFAULT_BITRATES)
 }
 
@@ -37,8 +40,8 @@ export async function register({settingsManager, peertubeHelpers, transcodingMan
 
     logger.info("Registering peertube-plugin-hardware-encode");
 
-    const encoder = 'h264_vaapi'
-    const profileName = 'vaapi'
+    const encoder = 'h264_nvenc'
+    const profileName = 'nvenc'
 
     // Add trasncoding profiles
     transcodingManager.addVODProfile(encoder, profileName, vodBuilder)
@@ -62,24 +65,40 @@ export async function register({settingsManager, peertubeHelpers, transcodingMan
         private: false
     })
     registerSetting({
-        name: 'quality',
-        label: 'Quality',
+        name: 'vod-quality',
+        label: 'VOD Quality',
 
         type: 'select',
         options: [
-            { label: 'Automatic', value: '-1' },
-            { label: '1', value: '1' },
-            { label: '2', value: '2' },
-            { label: '3', value: '3' },
-            { label: '4', value: '4' },
-            { label: '5', value: '5' },
-            { label: '6', value: '6' },
-            { label: '7', value: '7' }
+            { label: 'fastest', value: '12' },
+            { label: 'faster', value: '13' },
+            { label: 'fast', value: '14' },
+            { label: 'medium (default)', value: '15' },
+            { label: 'slow', value: '16' },
+            { label: 'slower', value: '17' },
+            { label: 'slowest', value: '18' }
         ],
 
-        descriptionHTML: 'This parameter controls the speed / quality tradeoff. Lower values mean better quality but slower encoding. Higher values mean faster encoding but lower quality. This setting is hardware dependent, you may need to experiment to find the best value for your hardware. Some hardware may have less than 7 levels of compression.',
+        descriptionHTML: 'This parameter controls the speed / quality tradeoff. Slower speed mean better quality. Faster speed mean lower quality. This setting is hardware dependent, you may need to experiment to find the best value for your hardware.',
 
-        default: DEFAULT_QUALITY.toString(),
+        default: DEFAULT_VOD_QUALITY.toString(),
+        private: false
+    })
+    
+    registerSetting({
+        name: 'live-quality',
+        label: 'Live Quality',
+
+        type: 'select',
+        options: [
+            { label: 'low latency (default)', value: '7' },
+            { label: 'low latency high quality', value: '8' },
+            { label: 'low latency high performance', value: '9' }
+        ],
+
+        descriptionHTML: 'This parameter controls the speed / quality tradeoff. High performance mean lower quality.',
+
+        default: DEFAULT_LIVE_QUALITY.toString(),
         private: false
     })
 
@@ -121,7 +140,8 @@ export async function unregister() {
 
 async function loadSettings(settingsManager: PluginSettingsManager) {
     pluginSettings.hardwareDecode = await settingsManager.getSetting('hardware-decode') == "true"
-    pluginSettings.quality = parseInt(await settingsManager.getSetting('quality') as string) || DEFAULT_QUALITY
+    pluginSettings.vodQuality = parseInt(await settingsManager.getSetting('vod-quality') as string) || DEFAULT_VOD_QUALITY
+    pluginSettings.liveQuality = parseInt(await settingsManager.getSetting('live-quality') as string) || DEFAULT_LIVE_QUALITY
 
     for (const [resolution, bitrate] of DEFAULT_BITRATES) {
         const key = `base-bitrate-${resolution}`
@@ -131,7 +151,8 @@ async function loadSettings(settingsManager: PluginSettingsManager) {
     }
 
     logger.info(`Hardware decode: ${pluginSettings.hardwareDecode}`)
-    logger.info(`Quality: ${pluginSettings.quality}`)
+    logger.info(`VOD Quality: ${pluginSettings.vodQuality}`)
+    logger.info(`Live Quality: ${pluginSettings.liveQuality}`)
 }
 
 function printResolution(resolution : VideoResolution) : string {
@@ -153,13 +174,12 @@ function printResolution(resolution : VideoResolution) : string {
 function buildInitOptions() {
     if (pluginSettings.hardwareDecode) {
         return [
-            '-hwaccel vaapi',
-            '-vaapi_device /dev/dri/renderD128',
-            '-hwaccel_output_format vaapi',
+            '-hwaccel cuda',
+            '-hwaccel_output_format cuda'
         ]
     } else {
         return [
-            '-vaapi_device /dev/dri/renderD128'
+            '-hwaccel cuda'
         ]
     }
 }
@@ -183,11 +203,12 @@ async function vodBuilder(params: EncoderOptionsBuilderParams) : Promise<Encoder
     let options : EncoderOptions = {
         scaleFilter: {
             // software decode requires specifying pixel format for hardware filter and upload it to GPU
-            name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+            // name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+            name: 'scale'
         },
         inputOptions: shouldInitVaapi ? buildInitOptions() : [],
         outputOptions: [
-            `-quality ${pluginSettings.quality}`,
+            `-preset ${pluginSettings.vodQuality}`,
             `-b:v${streamSuffix} ${targetBitrate}`,
             `-bufsize ${targetBitrate * 2}`
         ]
@@ -216,11 +237,12 @@ async function liveBuilder(params: EncoderOptionsBuilderParams) : Promise<Encode
     // You can also return a promise
     const options = {
       scaleFilter: {
-        name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+        // name: pluginSettings.hardwareDecode ? 'scale_vaapi' : 'format=nv12,hwupload,scale_vaapi'
+        name: 'scale'
       },
       inputOptions: shouldInitVaapi ? buildInitOptions() : [],
       outputOptions: [
-        `-quality ${pluginSettings.quality}`,
+        `-preset ${pluginSettings.liveQuality}`,
         `-r:v${streamSuffix} ${fps}`,
         `-profile:v${streamSuffix} high`,
         `-level:v${streamSuffix} 3.1`,
