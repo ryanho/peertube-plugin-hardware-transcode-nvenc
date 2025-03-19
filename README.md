@@ -1,3 +1,5 @@
+2025/03/19 - Hardware transcoding is not recommended because of the poor quality. Change this repository into an archive.
+
 # Hardware h264 encoding using NVIDIA NVENC
 
 This plugin tries to enable hardware accelerated transcoding profiles using nvenc on linux. It should be considered experimental and tinkering will certainly be necessary to make this plugin work on your hardware.
